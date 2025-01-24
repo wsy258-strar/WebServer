@@ -19,7 +19,7 @@ set(LIBS
     pthread 
 )
 
-#添加子目录
+#添加子目录使用
 add_subdirectory(src)
 add_subdirectory(memory)
 add_subdirectory(log)

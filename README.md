@@ -5,6 +5,11 @@
 
 本项目是一个高性能的WEB服务器，使用C++实现，项目底层采用了muduo库核心的设计思想，多线程多Reactor的网络模型，并且在这基础上增加了内存池，高效的双缓冲异步日志系统，以及LFU的缓存。
 
+## 开发环境
+
+* linux kernel version5.15.0-113-generic (ubuntu 22.04.6)
+* gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+* cmake version 3.22
 
 ## 目录结构
 

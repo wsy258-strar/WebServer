@@ -4,7 +4,7 @@
 #include <EventLoopThread.h>
 #include <Logger.h>
 EventLoopThreadPool::EventLoopThreadPool(EventLoop *baseLoop, const std::string &nameArg)
-    : baseLoop_(baseLoop), name_(nameArg), started_(false), numThreads_(0), next_(0), hash_(3)
+    : baseLoop_(baseLoop), name_(nameArg), started_(false), numThreads_(0), next_(0)
 {
 }
 
@@ -24,7 +24,6 @@ void EventLoopThreadPool::start(const ThreadInitCallback &cb)
         EventLoopThread *t = new EventLoopThread(cb, buf);
         threads_.push_back(std::unique_ptr<EventLoopThread>(t));
         loops_.push_back(t->startLoop()); // 底层创建线程 绑定一个新的EventLoop 并返回该loop的地址
-        hash_.addNode(buf);               // 将线程添加到一致哈希中。
     }
 
     if (numThreads_ == 0 && cb) // 整个服务端只有一个线程运行baseLoop
@@ -34,16 +33,26 @@ void EventLoopThreadPool::start(const ThreadInitCallback &cb)
 }
 
 // 如果工作在多线程中，baseLoop_(mainLoop)会默认以轮询的方式分配Channel给subLoop
-EventLoop *EventLoopThreadPool::getNextLoop(const std::string &key)
+EventLoop *EventLoopThreadPool::getNextLoop()
 {
-    size_t index = hash_.getNode(key); // 获取索引
-    if (index >= loops_.size())
+    // 如果只设置一个线程 也就是只有一个mainReactor 无subReactor 
+    // 那么轮询只有一个线程 getNextLoop()每次都返回当前的baseLoop_
+    EventLoop *loop = baseLoop_;    
+
+    // 通过轮询获取下一个处理事件的loop
+    // 如果没设置多线程数量，则不会进去，相当于直接返回baseLoop
+    if(!loops_.empty())             
     {
-        // 处理错误，例如返回 baseLoop 或抛出异常
-        LOG_ERROR<<"EventLoopThreadPool::getNextLoop ERROR";
-        return baseLoop_; // 或者返回 nullptr
+        loop = loops_[next_];
+        ++next_;
+        // 轮询
+        if(next_ >= loops_.size())
+        {
+            next_ = 0;
+        }
     }
-    return loops_[index]; // 使用索引访问 loops_
+
+    return loop;
 }
 
 

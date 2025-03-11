@@ -6,7 +6,6 @@
 #include <memory>
 
 #include "noncopyable.h"
-#include "ConsistenHash.h"
 class EventLoop;
 class EventLoopThread;
 
@@ -22,8 +21,8 @@ public:
 
     void start(const ThreadInitCallback &cb = ThreadInitCallback());
 
-    // 如果工作在多线程中，baseLoop_(mainLoop)会默认以轮询的方式分配Channel给subLoop
-    EventLoop *getNextLoop(const std::string& key);
+// 如果工作在多线程中，baseLoop_(mainLoop)会默认以轮询的方式分配Channel给subLoop
+    EventLoop *getNextLoop();
 
     std::vector<EventLoop *> getAllLoops(); // 获取所有的EventLoop
 
@@ -38,5 +37,4 @@ private:
     int next_; // 新连接到来，所选择EventLoop的索引
     std::vector<std::unique_ptr<EventLoopThread>> threads_;//IO线程的列表
     std::vector<EventLoop *> loops_;//线程池中EventLoop的列表，指向的是EVentLoopThread线程函数创建的EventLoop对象。
-    ConsistentHash hash_; // 一致性哈希对象
 };

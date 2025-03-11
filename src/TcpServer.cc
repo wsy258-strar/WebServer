@@ -65,14 +65,14 @@ void TcpServer::start()
 // 有一个新用户连接，acceptor会执行这个回调操作，负责将mainLoop接收到的请求连接(acceptChannel_会有读事件发生)通过回调轮询分发给subLoop去处理
 void TcpServer::newConnection(int sockfd, const InetAddress &peerAddr)
 {
-    // 轮询算法 选择一个subLoop 来管理connfd对应的channel
-    EventLoop *ioLoop = threadPool_->getNextLoop(peerAddr.toIp());
+   // 轮询算法 选择一个subLoop 来管理connfd对应的channel
+    EventLoop *ioLoop = threadPool_->getNextLoop();
     char buf[64] = {0};
     snprintf(buf, sizeof buf, "-%s#%d", ipPort_.c_str(), nextConnId_);
     ++nextConnId_;  // 这里没有设置为原子类是因为其只在mainloop中执行 不涉及线程安全问题
     std::string connName = name_ + buf;
 
-    LOG_INFO<<"TcpServer::newConnection ["<<name_.c_str()<<"]- new connection ["<<connName.c_str()<<"]from %s"<<peerAddr.toIpPort().c_str();
+    LOG_INFO<<"TcpServer::newConnection ["<<name_.c_str()<<"]- new connection ["<<connName.c_str()<<"]from "<<peerAddr.toIpPort().c_str();
     
     // 通过sockfd获取其绑定的本机的ip地址和端口信息
     sockaddr_in local;

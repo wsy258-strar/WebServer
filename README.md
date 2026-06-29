@@ -7,8 +7,8 @@
 
 基于 **Reactor 模型**的 C++11 高性能 Web 服务器，参考 [muduo](https://github.com/chenshuo/muduo) 网络库设计，支持 HTTP/1.1、内存池、LFU 缓存、异步日志。
 
-> 🚀 **长连接峰值 7.6 万 QPS**（localhost, 最小文件）  
-> 🎯 **P50 延迟 < 0.5ms**（缓存命中, 单次请求）  
+> 🚀 **长连接峰值 9.8 万 QPS** | 短连接 4.2k QPS（localhost, LFU 缓存命中）  
+> 🎯 **P50 延迟 138µs** | P99 延迟 492µs（c=10, 无日志）  
 > 🧵 **多线程 One Loop Per Thread 架构**
 
 ---
@@ -194,41 +194,40 @@ curl -si http://localhost:8080/
 
 ## 性能压测
 
-> 测试环境：Intel Core i7-10750H (12 核)、32GB RAM、WSL2 (Ubuntu)、关闭异步日志  
+> 测试环境：AMD Ryzen 9 7945HX (32 核)、7.6GB RAM、WSL2 (Ubuntu)、g++ 11.4.0 -O2、关闭异步日志  
 > 测试工具：[wrk](https://github.com/wg/wrk) (长连接) + [ab](https://httpd.apache.org/docs/2.4/programs/ab.html) (短连接)  
-> 测试目标：`/js/app.js`（~600B，LFU 缓存预热后）
+> 测试目标：`/js/app.js`（959B，LFU 缓存预热后）  
+> 完整报告：[benchmark/benchmark.md](benchmark/benchmark.md)
 
 ### 长连接 (HTTP/1.1 Keep-Alive)
 
-| 并发数 | QPS (req/s) | P50 延迟 | P99 延迟 |
-|--------|-------------|----------|----------|
-| 10 | 8,200 | 0.8ms | 2.1ms |
-| 50 | 9,063 | 3.63ms | 15ms |
-| 100 | 9,699 | 8.66ms | 35ms |
-| 200 | 9,500 | 15ms | 50ms |
-| 500 | 9,248 | 48ms | 180ms |
+| 并发 | QPS | P50 | P90 | P99 | Avg | 错误 |
+|------|-----|-----|-----|-----|-----|------|
+| 10 | 49,396 | 138µs | 276µs | 492µs | 161µs | 0 |
+| 50 | 73,302 | 500µs | 820µs | 1.28ms | 551µs | 0 |
+| 100 | **97,871** | 0.95ms | 1.38ms | 2.11ms | 1.01ms | 0 |
+| 200 | 74,468 | 2.12ms | 2.65ms | 4.06ms | 2.19ms | 0 |
+| 500 | 95,077 | 5.15ms | 5.95ms | 7.24ms | 5.23ms | 0 |
 
 ### 短连接 (HTTP/1.0, 每请求新 TCP)
 
-| 并发数 | QPS (req/s) | Connect 耗时 | Processing 耗时 | Total 耗时 |
-|--------|-------------|-------------|----------------|------------|
-| 10 | 4,200 | 0.3ms | 1.2ms | 1.5ms |
-| 50 | 5,100 | 0.5ms | 3.0ms | 3.5ms |
-| 100 | 5,300 | 0.8ms | 5.0ms | 5.8ms |
-| 200 | 5,100 | 1.5ms | 10ms | 11.5ms |
-| 500 | 4,800 | 3.0ms | 25ms | 28ms |
+| 并发 | QPS | Total | Connect | Process | 失败 |
+|------|-----|-------|---------|----------|------|
+| 10 | 4,094 | 2ms | 0ms | 2ms | 0 |
+| 50 | **4,225** | 12ms | 0ms | 12ms | 0 |
+| 100 | 4,209 | 23ms | 0ms | 23ms | 0 |
+| 200 | 4,134 | 47ms | 0ms | 47ms | 0 |
+| 500 | 4,065 | 116ms | 1ms | 115ms | 0 |
 
 ### 性能画像
 
 ```
-IO 吞吐 (长连接):    ████████████████████████  9,699 req/s
-TCP建连+IO (短连接):  █████████████             5,300 req/s
-长/短比值:            ~55%
+IO 吞吐 (长连接):    ████████████████████████████████████  97,871 req/s
+TCP建连+IO (短连接):  ██                                    4,225 req/s
+长/短比值:           ~4%
 ```
 
-> **长连接 QPS 约是短连接的 1.8 倍**，差值来自 TCP 三次握手 + 四次挥手开销。  
-> 短连接 `Processing` 耗时包含了一次完整的 `accept()` → `parseRequest()` → `send()` → `shutdown()` 链路。  
-> 启用异步日志后，P99 会出现 ~500ms 的尖刺延迟——这是后端缓冲区刷盘导致的瞬时阻塞，适合生产环境但极限压测时应关闭。
+> **长连接 QPS 约为短连接的 24 倍**。差值来自 TCP 三次握手/四次挥手 + 每请求创建销毁 `TcpConnection` 的开销。短连接 `Process` 耗时包含完整链路：`accept()` → `HttpContext::parseRequest()` → `StaticFileCache::get()` → `send()` → `shutdown()`。Connect 趋近 0ms 是因为 localhost 测试无网络延迟。
 
 ---
 
@@ -288,6 +287,10 @@ stateDiagram-v2
 - 直接在 `Buffer::peek()` 上操作，不拷贝临时字符串
 - 处理 TCP 流式特性：一次 `onMessage` 可能只收到半行请求行，状态机自动等待更多数据
 
+**per-connection 上下文：**
+- `HttpContext` 作为 `TcpConnection` 成员，每连接独立持有，消除多线程共享 map 的数据竞争
+- 连接关闭时随 `TcpConnection` 析构自动回收，无需手动清理
+
 **keep-alive 复用：**
 - `HttpContext::reset()` 通过 `swap()` 快速重置解析状态，复用已分配的内存
 - HTTP/1.0 默认短连接，HTTP/1.1 默认长连接（均按标准处理 `Connection` 头）
@@ -332,12 +335,12 @@ flowchart TB
 
 **已集成点：**
 
-| 对象 | 大小 | 每连接分配次数 |
-|------|------|---------------|
-| `Socket` | ~8B | 1 |
-| `Channel` | ~176B | 1 |
+| 对象 | 大小 | 每连接分配次数 | 集成方式 |
+|------|------|---------------|----------|
+| `Socket` | ~8B | 1 | `std::unique_ptr<Socket, SocketDeleter>` |
+| `Channel` | ~176B | 1 | `std::unique_ptr<Channel, ChannelDeleter>` |
 
-通过 `std::unique_ptr<T, CustomDeleter>` + `newElement<T>()` 实现，对外接口完全透明。
+通过 `memoryPool::newElement<T>(args...)` 分配、`memoryPool::deleteElement(ptr)` 回收，配合自定义 `unique_ptr` deleter 实现透明集成。高并发短连接场景下，每秒可避免数千次系统 `malloc`/`free` 调用。
 
 ### 5. 双缓冲异步日志
 
@@ -403,9 +406,11 @@ flowchart LR
 
 ```
 webserver/
-├── CMakeLists.txt                   # 顶层 CMAKE 配置
+├── CMakeLists.txt                   # 顶层 CMake 配置
 ├── README.md
 ├── LICENSE
+├── .gitignore
+├── compile_commands.json            # clangd 代码补全 (cmake 生成)
 │
 ├── include/                         # 头文件
 │   ├── base/                        #   基础工具
@@ -421,7 +426,7 @@ webserver/
 │   │   ├── Poller.h / EPollPoller.h #     epoll 多路复用
 │   │   ├── Channel.h                #     fd + 事件回调封装
 │   │   ├── TcpServer.h              #     TCP 服务器外观类
-│   │   ├── TcpConnection.h          #     单个 TCP 连接全生命周期
+│   │   ├── TcpConnection.h          #     单个 TCP 连接全生命周期(含 HttpContext)
 │   │   ├── Acceptor.h               #     listen + accept
 │   │   ├── Socket.h                 #     socket 操作封装
 │   │   ├── Buffer.h                 #     应用层缓冲区
@@ -430,13 +435,13 @@ webserver/
 │   │
 │   ├── http/                        #   HTTP 协议层
 │   │   ├── HttpServer.h             #     HTTP 服务器外观类
-│   │   ├── HttpContext.h            #     增量 HTTP 解析状态机
+│   │   ├── HttpContext.h            #     增量 HTTP 解析状态机(per-connection)
 │   │   ├── HttpRequest.h            #     HTTP 请求数据载体
 │   │   ├── HttpResponse.h           #     HTTP 响应构建器
 │   │   └── StaticFileCache.h        #     LFU 静态文件缓存
 │   │
 │   ├── log/                         #   异步日志
-│   │   ├── Logger.h                 #     日志宏 (LOG_INFO, LOG_FATAL...)
+│   │   ├── Logger.h                 #     日志宏 (LOG_INFO, LOG_FATAL…)
 │   │   ├── AsyncLogging.h           #     双缓冲异步日志后端
 │   │   ├── LogStream.h              #     流式日志格式化
 │   │   ├── LogFile.h                #     日志文件滚动
@@ -445,19 +450,46 @@ webserver/
 │   │
 │   ├── timer/                       #   定时器
 │   │   ├── Timer.h                  #     定时器对象
-│   │   └── TimerQueue.h             #     timerfd + 红黑树定时器队列
+│   │   └── TimerQueue.h             #     timerfd + std::set 红黑树定时器队列
 │   │
-│   ├── memoryPool.h                 #   内存池 (64 级槽位)
-│   ├── LFU.h                        #   LFU 缓存 (含哈希分片)
+│   ├── memoryPool.h                 #   内存池 (64 级固定槽位)
+│   ├── LFU.h                        #   LFU 缓存 (KLfuCache + KHashLfuCache)
 │   └── KICachePolicy.h              #   缓存策略抽象接口
 │
-├── src/                             # 源文件 (与 include/ 结构对应)
+├── src/                             # 源文件
 │   ├── main.cpp
+│   ├── DefaultPoller.cpp            #   Poller 工厂 (创建 EPollPoller)
 │   ├── base/
+│   │   ├── CurrentThread.cpp
+│   │   ├── Thread.cpp
+│   │   └── Timestamp.cpp
 │   ├── net/
+│   │   ├── Acceptor.cpp
+│   │   ├── Buffer.cpp
+│   │   ├── Channel.cpp
+│   │   ├── EPollPoller.cpp
+│   │   ├── EventLoop.cpp
+│   │   ├── EventLoopThread.cpp
+│   │   ├── EventLoopThreadPool.cpp
+│   │   ├── InetAddress.cpp
+│   │   ├── Poller.cpp
+│   │   ├── Socket.cpp
+│   │   ├── TcpConnection.cpp
+│   │   └── TcpServer.cpp
 │   ├── http/
+│   │   ├── HttpContext.cpp
+│   │   ├── HttpRequest.cpp
+│   │   ├── HttpResponse.cpp
+│   │   └── HttpServer.cpp
 │   ├── log/
+│   │   ├── AsyncLogging.cpp
+│   │   ├── FileUtil.cpp
+│   │   ├── LogFile.cpp
+│   │   ├── LogStream.cpp
+│   │   └── Logger.cpp
 │   └── timer/
+│       ├── Timer.cpp
+│       └── TimerQueue.cpp
 │
 ├── memory/                          # 内存池实现
 │   ├── CMakeLists.txt
@@ -471,12 +503,18 @@ webserver/
 │       └── app.js
 │
 ├── benchmark/                       # 压测工具
-│   ├── run.sh                       #   自动化压测脚本
-│   └── results/                     #   压测报告存档
+│   ├── run.sh                       #   一键自动化压测
+│   ├── long_conn.sh                 #   长连接压测 (wrk)
+│   ├── short_conn.sh                #   短连接压测 (ab)
+│   ├── gdb_debug.gdb                #   gdb 崩溃调试脚本
+│   ├── benchmark.md                 #   压测完整报告
+│   └── results/                     #   压测原始日志
 │
+├── tests/                           # 测试用例
 ├── build/                           # CMake 构建目录
 ├── bin/                             # 可执行文件输出
-└── lib/                             # 共享库输出
+├── lib/                             # 共享库输出 (.so)
+└── logs/                            # 运行时日志文件
 ```
 
 ---
@@ -588,17 +626,24 @@ make -j$(nproc)
 ## 压测脚本
 
 ```bash
-# 一键自动化压测（启动服务器 + 长连接 + 短连接 + 生成报告）
-./benchmark/run.sh
+# 1. 启动服务器
+./bin/main > /dev/null 2>&1 &
 
-# 指定测试路径
-./benchmark/run.sh /index.html
+# 2. 长连接压测 (wrk, HTTP/1.1 keep-alive)
+./benchmark/long_conn.sh /js/app.js
+
+# 3. 短连接压测 (ab, HTTP/1.0, 每请求新 TCP)
+./benchmark/short_conn.sh /js/app.js
 
 # 报告保存在
-ls benchmark/results/report_*.md
+ls benchmark/results/long_conn_*.log
+ls benchmark/results/short_conn_*.log
+
+# 完整压测报告
+cat benchmark/benchmark.md
 ```
 
-脚本自动完成：编译 → 启动服务器 → 预热缓存 → 5 个并发梯度 × (长连接 + 短连接) → 生成 Markdown 报告。
+两个脚本各跑各的，互不干扰。每个脚本 5 个并发梯度（10/50/100/200/500），结果输出到 `benchmark/results/`。
 
 ---
 

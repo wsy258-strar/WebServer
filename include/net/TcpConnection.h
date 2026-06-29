@@ -9,10 +9,29 @@
 #include "Callbacks.h"
 #include "Buffer.h"
 #include "Timestamp.h"
+#include "memoryPool.h"
 
 class Channel;
 class EventLoop;
 class Socket;
+
+// ========== 内存池自定义删除器 ==========
+// 用于 std::unique_ptr，在对象析构时通过内存池回收内存
+struct ChannelDeleter
+{
+    void operator()(Channel* p) const
+    {
+        memoryPool::deleteElement(p);
+    }
+};
+
+struct SocketDeleter
+{
+    void operator()(Socket* p) const
+    {
+        memoryPool::deleteElement(p);
+    }
+};
 
 /**
  * 封装「单个 TCP 连接全生命周期」的核心类，是 subLoop（IO 线程）处理具体连接 IO 的核心载体
@@ -83,8 +102,8 @@ private:
     bool reading_;//连接是否在监听读事件
 
     // Socket Channel 这里和Acceptor类似    Acceptor => mainloop    TcpConnection => subloop
-    std::unique_ptr<Socket> socket_;
-    std::unique_ptr<Channel> channel_;
+    std::unique_ptr<Socket, SocketDeleter> socket_;
+    std::unique_ptr<Channel, ChannelDeleter> channel_;
 
     const InetAddress localAddr_;
     const InetAddress peerAddr_;

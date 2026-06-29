@@ -33,8 +33,8 @@ TcpConnection::TcpConnection(EventLoop *loop,
     , name_(nameArg)
     , state_(kConnecting)
     , reading_(true)
-    , socket_(new Socket(sockfd))
-    , channel_(new Channel(loop, sockfd))
+    , socket_(memoryPool::newElement<Socket>(sockfd))
+    , channel_(memoryPool::newElement<Channel>(loop, sockfd))
     , localAddr_(localAddr)
     , peerAddr_(peerAddr)
     , highWaterMark_(64 * 1024 * 1024) // 64M

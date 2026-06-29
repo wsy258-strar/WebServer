@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>webserver - 静态文件服务</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 webserver</h1>
+            <p class="subtitle">基于 Reactor 模式的 C++11 高性能 Web 服务器</p>
+        </header>
+
+        <main>
+            <section class="card">
+                <h2>✨ 特性</h2>
+                <ul>
+                    <li>Multi-Reactor 多线程架构 (主线程 Accept + 子线程 IO)</li>
+                    <li>Epoll + 非阻塞 IO 事件驱动</li>
+                    <li>HTTP/1.1 Keep-Alive 长连接支持</li>
+                    <li>哈希分片 LFU 静态文件缓存</li>
+                    <li>内存池优化 per-connection 分配</li>
+                    <li>异步日志系统</li>
+                </ul>
+            </section>
+
+            <section class="card">
+                <h2>📊 技术栈</h2>
+                <div class="tech-grid">
+                    <div class="tech-item">
+                        <span class="tech-name">事件模型</span>
+                        <span class="tech-value">Epoll (ET/LT)</span>
+                    </div>
+                    <div class="tech-item">
+                        <span class="tech-name">线程模型</span>
+                        <span class="tech-value">One Loop Per Thread</span>
+                    </div>
+                    <div class="tech-item">
+                        <span class="tech-name">缓存策略</span>
+                        <span class="tech-value">LFU + 哈希分片</span>
+                    </div>
+                    <div class="tech-item">
+                        <span class="tech-name">内存管理</span>
+                        <span class="tech-value">固定大小槽位内存池</span>
+                    </div>
+                    <div class="tech-item">
+                        <span class="tech-name">日志</span>
+                        <span class="tech-value">双缓冲异步日志</span>
+                    </div>
+                    <div class="tech-item">
+                        <span class="tech-name">协议</span>
+                        <span class="tech-value">HTTP/1.1</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>🧪 测试端点</h2>
+                <table>
+                    <tr><td><code>GET /</code></td><td>本页面</td></tr>
+                    <tr><td><code>GET /api/test</code></td><td>测试动态路由</td></tr>
+                    <tr><td><code>GET /css/style.css</code></td><td>静态 CSS 文件</td></tr>
+                    <tr><td><code>GET /js/app.js</code></td><td>静态 JS 文件</td></tr>
+                    <tr><td><code>GET /nonexistent</code></td><td>404 测试</td></tr>
+                    <tr><td><code>GET /test?name=world</code></td><td>查询参数解析</td></tr>
+                </table>
+            </section>
+        </main>
+
+        <footer>
+            <p>Powered by C++11 &nbsp;|&nbsp; LFU Cache Enabled &nbsp;|&nbsp; Memory Pool Ready</p>
+        </footer>
+    </div>
+    <script src="/js/app.js"></script>
+</body>
+</html>

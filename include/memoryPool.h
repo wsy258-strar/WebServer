@@ -90,7 +90,7 @@ T* newElement(Args&&... args)
     // 根据元素大小选取合适的内存池分配内存
     if ((p = reinterpret_cast<T*>(HashBucket::useMemory(sizeof(T)))) != nullptr)
         // 在分配的内存上构造对象
-        new(p) T(std::forward<Args>(args)...);
+        new(p) T(std::forward<Args>(args)...); //完美转发，保证传递给 T 构造函数的参数 “左值还是左值、右值还是右值”（比如传递临时字符串时，保持右值特性，触发 T 的移动构造，减少拷贝开销）。
 
     return p;
 }

@@ -43,7 +43,7 @@ void* MemoryPool::allocate()
                 freeList_ = freeList_->next;
                 return temp;
             }
-        }
+        }//离开作用域 → lock_guard析构 → 自动调用 mutexForFreeList_.unlock() 解锁
     }
 
     Slot* temp;
@@ -82,11 +82,13 @@ void MemoryPool::allocateNewBlock()
     reinterpret_cast<Slot*>(newBlock)->next = firstBlock_;
     firstBlock_ = reinterpret_cast<Slot*>(newBlock);
 
-    char* body = reinterpret_cast<char*>(newBlock) + sizeof(Slot*);
+    char* body = reinterpret_cast<char*>(newBlock) + sizeof(Slot); // 精准定位新申请内存块中，跳过 “内存块管理头节点（Slot）” 后的实际可用内存起始位置; sizeof(Slot) = 8B
+                                                                    //char*：“字节级内存地址”—— 编译器知道它的最小操作单位是 1 字节，因此支持「以字节为单位的指针加减」，能精准控制内存偏移；        
     size_t paddingSize = padPointer(body, SlotSize_); // 计算对齐需要填充内存的大小
-    curSlot_ = reinterpret_cast<Slot*>(body + paddingSize);
+    curSlot_ = reinterpret_cast<Slot*>(body + paddingSize);//内存对齐之后的未被使用的起始位置槽
 
     // 超过该标记位置，则说明该内存块已无内存槽可用，需向系统申请新的内存块
+    // lastSlot_指向当前内存块中最后能存储槽的位置标志，等于或大于这个位置就代表当前内存块不足构成一个槽位以再用于存储对象了，所以要+1
     lastSlot_ = reinterpret_cast<Slot*>(reinterpret_cast<size_t>(newBlock) + BlockSize_ - SlotSize_ + 1);
 
     freeList_ = nullptr;
@@ -103,14 +105,14 @@ void HashBucket::initMemoryPool()
 {
     for (int i = 0; i < MEMORY_POOL_NUM; i++)
     {
-        getMemoryPool(i).init((i + 1) * SLOT_BASE_SIZE);
+        getMemoryPool(i).init((i + 1) * SLOT_BASE_SIZE); //SlotSize_最小为8,依次为上一个的二倍，参考STL Allocater
     }
 }   
 
 // 单例模式
 MemoryPool& HashBucket::getMemoryPool(int index)
 {
-    static MemoryPool memoryPool[MEMORY_POOL_NUM];
+    static MemoryPool memoryPool[MEMORY_POOL_NUM]; //64个内存池，每一个Block就是一个内存池
     return memoryPool[index];
 }
 

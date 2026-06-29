@@ -1,7 +1,7 @@
 #顶层Cmake，设置全局链接库以及添加子目录，和项目的头文件.h位置
 #设置最低版本和项目名称
 cmake_minimum_required(VERSION 3.0)
-project(kama-webserver)
+project(webserver)
 
 #设置全局的c++标准
 set (CMAKE_CXX_STANDARD 11)

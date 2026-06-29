@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
     memoryPool::HashBucket::initMemoryPool();
 
     const int CAPACITY = 5;
-    KamaCache::KLfuCache<int, std::string> lfu(CAPACITY);
+    cache::KLfuCache<int, std::string> lfu(CAPACITY);
 
     // ========== 第三步: 启动HTTP服务器 ==========
     EventLoop loop;
@@ -66,9 +66,9 @@ int main(int argc, char *argv[])
             // 构建响应页面，展示请求信息
             std::string body;
             body += "<!DOCTYPE html>\r\n";
-            body += "<html><head><title>kama-webserver</title></head>\r\n";
+            body += "<html><head><title>webserver</title></head>\r\n";
             body += "<body>\r\n";
-            body += "<h1>Welcome to kama-webserver</h1>\r\n";
+            body += "<h1>Welcome to webserver</h1>\r\n";
             body += "<h2>Request Info</h2>\r\n";
             body += "<table border=\"1\" cellpadding=\"8\">\r\n";
 
@@ -119,7 +119,7 @@ int main(int argc, char *argv[])
             }
 
             body += "</table>\r\n";
-            body += "<hr><center>kama-webserver</center>\r\n";
+            body += "<hr><center>webserver</center>\r\n";
             body += "</body></html>\r\n";
 
             resp->setStatusCode(HttpResponse::k200Ok);

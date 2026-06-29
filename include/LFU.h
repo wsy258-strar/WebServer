@@ -8,7 +8,10 @@
 #include <vector>
 
 #include "KICachePolicy.h"
-
+/*
+ * 在LFU算法之上，引入访问次数平均值概念，当平均值大于最大平均值限制时将所有结点的访问次数减去最大平均值限制的一半或者一个固定值。
+ * 相当于热点数据“老化”了，这样可以避免频次计数溢出，也可以缓解缓存污染。
+*/
 namespace KamaCache
 {
 
@@ -34,8 +37,8 @@ private:
 
     using NodePtr = std::shared_ptr<Node>;
     int freq_; // 访问频率
-    NodePtr head_; // 假头结点
-    NodePtr tail_; // 假尾结点
+    NodePtr head_; // 假头结点（左哨兵节点），本身不存储实际的缓存数据
+    NodePtr tail_; // 假尾结点（右哨兵节点），本身不存储实际的缓存数据
 
 public:
     explicit FreqList(int n) 
@@ -52,7 +55,7 @@ public:
       return head_->next == tail_;
     }
 
-    // 提那家结点管理方法
+    //双向链表的尾插法
     void addNode(NodePtr node) 
     {
         if (!node || !head_ || !tail_) 
@@ -97,7 +100,7 @@ public:
     {}
 
     ~KLfuCache() override = default;
-
+    //更新缓存数据
     void put(Key key, Value value) override
     {
         if (capacity_ == 0)
@@ -146,8 +149,8 @@ public:
     }
 
 private:
-    void putInternal(Key key, Value value); // 添加缓存
-    void getInternal(NodePtr node, Value& value); // 获取缓存
+    void putInternal(Key key, Value value); // 添加缓存(将新的key，value加入到缓存中)
+    void getInternal(NodePtr node, Value& value); // 获取缓存(访问缓存节点，返回value,freq++，删除重新加入freqToFreqList_)
 
     void kickOut(); // 移除缓存中的过期数据
 
@@ -156,7 +159,7 @@ private:
 
     void addFreqNum(); // 增加平均访问等频率
     void decreaseFreqNum(int num); // 减少平均访问等频率
-    void handleOverMaxAverageNum(); // 处理当前平均访问频率超过上限的情况
+    void handleOverMaxAverageNum(); // 处理当前平均访问频率超过上限的情况，当前平均访问频次已经超过了最大平均访问频次，所有结点的访问频次- (maxAverageNum_ / 2)
     void updateMinFreq();
 
 private:
@@ -166,12 +169,12 @@ private:
     int                                            curAverageNum_; // 当前平均访问频次
     int                                            curTotalNum_; // 当前访问所有缓存次数总数 
     std::mutex                                     mutex_; // 互斥锁
-    NodeMap                                        nodeMap_; // key 到 缓存节点的映射
-    std::unordered_map<int, FreqList<Key, Value>*> freqToFreqList_;// 访问频次到该频次链表的映射
+    NodeMap                                        nodeMap_; // key 到 缓存节点的映射(key,NodePtr)
+    std::unordered_map<int, FreqList<Key, Value>*> freqToFreqList_;// 访问频次到该频次链表的映射，unordered_map的key为频次
 };
 
 template<typename Key, typename Value>
-void KLfuCache<Key, Value>::getInternal(NodePtr node, Value& value)
+void KLfuCache<Key, Value>::getInternal(NodePtr node, Value& value) //node 是指向已找到的目标缓存节点的智能指针
 {
     // 找到之后需要将其从低访问频次的链表中删除，并且添加到+1的访问频次链表中，
     // 访问频次+1, 然后把value值返回
@@ -206,7 +209,7 @@ void KLfuCache<Key, Value>::putInternal(Key key, Value value)
     addFreqNum();
     minFreq_ = std::min(minFreq_, 1);
 }
-
+// 移除缓存中的过期数据
 template<typename Key, typename Value>
 void KLfuCache<Key, Value>::kickOut()
 {
@@ -244,7 +247,7 @@ void KLfuCache<Key, Value>::addToFreqList(NodePtr node)
 
     freqToFreqList_[freq]->addNode(node);
 }
-
+//增加总访问频次和当前平均访问频次
 template<typename Key, typename Value>
 void KLfuCache<Key, Value>::addFreqNum()
 {
@@ -280,7 +283,7 @@ void KLfuCache<Key, Value>::handleOverMaxAverageNum()
     // 当前平均访问频次已经超过了最大平均访问频次，所有结点的访问频次- (maxAverageNum_ / 2)
     for (auto it = nodeMap_.begin(); it != nodeMap_.end(); ++it)
     {
-        // 检查结点是否为空
+        // 检查结点是否为空（防止空指针解引用导致程序崩溃）
         if (!it->second)
             continue;
 
@@ -325,7 +328,7 @@ public:
         : sliceNum_(sliceNum > 0 ? sliceNum : std::thread::hardware_concurrency())
         , capacity_(capacity)
     {
-        size_t sliceSize = std::ceil(capacity_ / static_cast<double>(sliceNum_)); // 每个lfu分片的容量
+        size_t sliceSize = std::ceil(capacity_ / static_cast<double>(sliceNum_)); // 每个lfu分片的容量 sliceSize：缓存分片大小
         for (int i = 0; i < sliceNum_; ++i)
         {
             lfuSliceCaches_.emplace_back(new KLfuCache<Key, Value>(sliceSize, maxAverageNum));

@@ -12,7 +12,7 @@
  * 在LFU算法之上，引入访问次数平均值概念，当平均值大于最大平均值限制时将所有结点的访问次数减去最大平均值限制的一半或者一个固定值。
  * 相当于热点数据“老化”了，这样可以避免频次计数溢出，也可以缓解缓存污染。
 */
-namespace KamaCache
+namespace cache
 {
 
 template<typename Key, typename Value> class KLfuCache;
@@ -379,4 +379,4 @@ private:
     std::vector<std::unique_ptr<KLfuCache<Key, Value>>> lfuSliceCaches_; // 缓存lfu分片容器
 };
 
-} // namespace KamaCache
+} // namespace cache

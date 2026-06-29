@@ -34,7 +34,7 @@ void HttpResponse::appendToBuffer(Buffer* output) const
 
     // 3. Server 头
     {
-        const char* s = "Server: kama-webserver\r\n";
+        const char* s = "Server: webserver\r\n";
         output->append(s, strlen(s));
     }
 
@@ -104,7 +104,7 @@ HttpResponse HttpResponse::makeErrorResponse(HttpStatusCode code, bool close,
     {
         body += "<center><p>" + extraInfo + "</p></center>\r\n";
     }
-    body += "<hr><center>kama-webserver</center>\r\n";
+    body += "<hr><center>webserver</center>\r\n";
     body += "</body></html>\r\n";
 
     resp.setContentType("text/html");

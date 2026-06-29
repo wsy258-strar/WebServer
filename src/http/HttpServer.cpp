@@ -1,4 +1,5 @@
 #include <http/HttpServer.h>
+#include <http/HttpContext.h>
 #include <Logger.h>
 
 HttpServer::HttpServer(EventLoop* loop,
@@ -24,7 +25,7 @@ void HttpServer::onConnection(const TcpConnectionPtr& conn)
     else
     {
         LOG_INFO << "HTTP connection DOWN : " << conn->peerAddress().toIpPort();
-        contexts_.erase(conn.get()); // 清理该连接的解析状态
+        // HttpContext 随 TcpConnection 生命周期自动销毁，无需手动清理
     }
 
     // 传递给用户自定义的连接回调
@@ -38,8 +39,8 @@ void HttpServer::onConnection(const TcpConnectionPtr& conn)
 
 void HttpServer::onMessage(const TcpConnectionPtr& conn, Buffer* buf, Timestamp receiveTime)
 {
-    // 获取或创建该连接的HttpContext
-    HttpContext& context = contexts_[conn.get()];
+    // 获取该连接的HttpContext (每连接独立，无线程竞争)
+    HttpContext& context = conn->getContext();
 
     // 增量解析
     if (!context.parseRequest(buf, receiveTime))
@@ -52,7 +53,6 @@ void HttpServer::onMessage(const TcpConnectionPtr& conn, Buffer* buf, Timestamp 
         resp.appendToBuffer(&respBuf);
         conn->send(respBuf.retrieveAllAsString());
         conn->shutdown();
-        contexts_.erase(conn.get());
         return;
     }
 

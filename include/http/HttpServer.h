@@ -1,7 +1,6 @@
 #pragma once
 
 #include <functional>
-#include <map>
 #include <string>
 #include <memory>
 
@@ -9,7 +8,6 @@
 #include <net/InetAddress.h>
 #include <net/Buffer.h>
 #include <net/Callbacks.h>
-#include <http/HttpContext.h>
 #include <http/HttpRequest.h>
 #include <http/HttpResponse.h>
 #include <base/noncopyable.h>
@@ -57,7 +55,4 @@ private:
     TcpServer server_;
     HttpCallback httpCallback_;
     ConnectionCallback connectionCallback_;
-
-    /// 每个连接的解析器状态，key为TcpConnection*指针
-    std::map<TcpConnection*, HttpContext> contexts_;
 };

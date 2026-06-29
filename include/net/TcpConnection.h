@@ -10,6 +10,7 @@
 #include "Buffer.h"
 #include "Timestamp.h"
 #include "memoryPool.h"
+#include "http/HttpContext.h"
 
 class Channel;
 class EventLoop;
@@ -119,4 +120,11 @@ private:
     // 数据缓冲区
     Buffer inputBuffer_;    // 接收数据的缓冲区
     Buffer outputBuffer_;   // 发送数据的缓冲区 用户send向outputBuffer_发
+
+public:
+    /// HTTP 协议层上下文(每连接独立的解析状态，避免多线程竞争)
+    HttpContext& getContext() { return context_; }
+
+private:
+    HttpContext context_;
 };

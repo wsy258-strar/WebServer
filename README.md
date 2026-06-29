@@ -327,7 +327,7 @@ flowchart TB
     MP0 --> CS0["curSlot_<br/>下一个空闲槽位"]
     MP0 --> BLK["Block (4096B)<br/>operator new 一次申请"]
 
-    HB --> overflow["size > 512B<br/>→ operator new/delete"}
+    HB --> overflow["size &gt; 512B → operator new/delete"]
 ```
 
 **已集成点：**

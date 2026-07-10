@@ -50,6 +50,7 @@ EventLoop::EventLoop()
     , poller_(Poller::newDefaultPoller(this))
     , wakeupFd_(createEventfd())
     , wakeupChannel_(new Channel(this, wakeupFd_))
+    , timerQueue_(new TimerQueue(this))
 {
     LOG_DEBUG<<"EventLoop created"<<this<<"in thread"<<threadId_;
     if (t_loopInThisThread)

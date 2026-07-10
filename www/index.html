@@ -3,75 +3,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>webserver - 静态文件服务</title>
+    <title>AR 协同渲染 — webserver</title>
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🚀 webserver</h1>
-            <p class="subtitle">基于 Reactor 模式的 C++11 高性能 Web 服务器</p>
+            <h1>🥽 AR 协同渲染</h1>
+            <p class="subtitle">多用户场景会话 · MySQL 持久化 · 内存池 · LFU 缓存</p>
         </header>
 
         <main>
-            <section class="card">
-                <h2>✨ 特性</h2>
-                <ul>
-                    <li>Multi-Reactor 多线程架构 (主线程 Accept + 子线程 IO)</li>
-                    <li>Epoll + 非阻塞 IO 事件驱动</li>
-                    <li>HTTP/1.1 Keep-Alive 长连接支持</li>
-                    <li>哈希分片 LFU 静态文件缓存</li>
-                    <li>内存池优化 per-connection 分配</li>
-                    <li>异步日志系统</li>
-                </ul>
+            <!-- ====== 认证区 ====== -->
+            <section class="card" id="auth-card">
+                <h2>🔐 身份认证（注册/登录合一）</h2>
+                <p class="hint">输入用户名和密码。新用户自动注册并创建会话，已有用户直接登录。</p>
+                <div class="login-form">
+                    <input type="text"     id="auth-username" placeholder="用户名" maxlength="64">
+                    <input type="password" id="auth-password" placeholder="密码" maxlength="64">
+                    <button onclick="doAuth()">进入 AR 空间</button>
+                </div>
+                <div id="auth-result" class="result-box hidden"></div>
             </section>
 
-            <section class="card">
-                <h2>📊 技术栈</h2>
-                <div class="tech-grid">
-                    <div class="tech-item">
-                        <span class="tech-name">事件模型</span>
-                        <span class="tech-value">Epoll (ET/LT)</span>
-                    </div>
-                    <div class="tech-item">
-                        <span class="tech-name">线程模型</span>
-                        <span class="tech-value">One Loop Per Thread</span>
-                    </div>
-                    <div class="tech-item">
-                        <span class="tech-name">缓存策略</span>
-                        <span class="tech-value">LFU + 哈希分片</span>
-                    </div>
-                    <div class="tech-item">
-                        <span class="tech-name">内存管理</span>
-                        <span class="tech-value">固定大小槽位内存池</span>
-                    </div>
-                    <div class="tech-item">
-                        <span class="tech-name">日志</span>
-                        <span class="tech-value">双缓冲异步日志</span>
-                    </div>
-                    <div class="tech-item">
-                        <span class="tech-name">协议</span>
-                        <span class="tech-value">HTTP/1.1</span>
-                    </div>
+            <!-- ====== 当前会话 ====== -->
+            <section class="card hidden" id="session-card">
+                <h2>📡 当前会话</h2>
+                <div class="session-info">
+                    <div class="info-row"><span>用户:</span><strong id="sess-user">-</strong></div>
+                    <div class="info-row"><span>Session Token:</span><code id="sess-token">-</code></div>
+                    <div class="info-row"><span>当前场景:</span><strong id="sess-scene">-</strong></div>
+                    <div class="info-row"><span>状态:</span><span id="sess-status" class="status-badge">-</span></div>
+                    <div class="info-row"><span>会话创建:</span><span id="sess-created">-</span></div>
+                    <div class="info-row"><span>最后更新:</span><span id="sess-updated">-</span></div>
                 </div>
             </section>
 
+            <!-- ====== 场景区 ====== -->
+            <section class="card hidden" id="scene-card">
+                <h2>🎮 场景会话</h2>
+                <div class="login-form">
+                    <select id="scene-select">
+                        <option value="">-- 选择场景 --</option>
+                        <option value="1">🏛️ 苔蚀巨神废墟</option>
+                        <option value="2">🛰️ 深空失联观测站</option>
+                        <option value="3">🍁 烟雨枫桥渡</option>
+                        <option value="4">🚇 灰霾地铁避难所</option>
+                        <option value="5">🌃 霓虹黑市深巷</option>
+                    </select>
+                    <button onclick="enterScene()" class="btn-enter">▶ 进入场景</button>
+                    <button onclick="exitScene()" class="btn-exit">■ 退出场景</button>
+                </div>
+                <div id="scene-result" class="result-box hidden"></div>
+            </section>
+
+            <!-- ====== 请求日志 ====== -->
+            <section class="card hidden" id="log-card">
+                <h2>📋 请求日志</h2>
+                <div id="log-list"></div>
+            </section>
+
+            <!-- ====== 技术栈 ====== -->
             <section class="card">
-                <h2>🧪 测试端点</h2>
-                <table>
-                    <tr><td><code>GET /</code></td><td>本页面</td></tr>
-                    <tr><td><code>GET /api/test</code></td><td>测试动态路由</td></tr>
-                    <tr><td><code>GET /css/style.css</code></td><td>静态 CSS 文件</td></tr>
-                    <tr><td><code>GET /js/app.js</code></td><td>静态 JS 文件</td></tr>
-                    <tr><td><code>GET /nonexistent</code></td><td>404 测试</td></tr>
-                    <tr><td><code>GET /test?name=world</code></td><td>查询参数解析</td></tr>
-                </table>
+                <h2>📊 后端技术栈</h2>
+                <div class="tech-grid">
+                    <div class="tech-item"><span class="tech-name">事件模型</span><span class="tech-value">Epoll LT</span></div>
+                    <div class="tech-item"><span class="tech-name">线程模型</span><span class="tech-value">One Loop Per Thread</span></div>
+                    <div class="tech-item"><span class="tech-name">会话持久化</span><span class="tech-value">MySQL 8.0 + 连接池</span></div>
+                    <div class="tech-item"><span class="tech-name">异步DB</span><span class="tech-value">DBWorkerPool (4线程)</span></div>
+                    <div class="tech-item"><span class="tech-name">L2 共享缓存</span><span class="tech-value">Redis + 两级缓存</span></div>
+                    <div class="tech-item"><span class="tech-name">L1 本地缓存</span><span class="tech-value">LFU + 哈希分片</span></div>
+                    <div class="tech-item"><span class="tech-name">内存管理</span><span class="tech-value">64级槽位内存池</span></div>
+                    <div class="tech-item"><span class="tech-name">异步日志</span><span class="tech-value">双缓冲前后端分离</span></div>
+                    <div class="tech-item"><span class="tech-name">连接治理</span><span class="tech-value">eventfd 跨线程唤醒</span></div>
+                    <div class="tech-item"><span class="tech-name">定时器</span><span class="tech-value">timerfd + 红黑树</span></div>
+                    <div class="tech-item"><span class="tech-name">HTTP 协议</span><span class="tech-value">HTTP/1.1 Keep-Alive</span></div>
+                    <div class="tech-item"><span class="tech-name">零拷贝</span><span class="tech-value">sendfile + readv</span></div>
+                </div>
             </section>
         </main>
 
-        <footer>
-            <p>Powered by C++11 &nbsp;|&nbsp; LFU Cache Enabled &nbsp;|&nbsp; Memory Pool Ready</p>
-        </footer>
+        <footer><p>webserver · MySQL 连接池 · LFU 缓存 · 内存池 · 异步日志</p></footer>
     </div>
     <script src="/js/app.js"></script>
 </body>

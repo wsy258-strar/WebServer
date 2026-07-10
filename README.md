@@ -5,11 +5,11 @@
 [![Build](https://img.shields.io/badge/build-CMake-green)](https://cmake.org)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 
-基于 **Reactor 模型**的 C++11 高性能 Web 服务器，参考 [muduo](https://github.com/chenshuo/muduo) 网络库设计，支持 HTTP/1.1、内存池、LFU 缓存、异步日志。
+基于 **Reactor 模型**的 C++11 高性能 Web 服务器，参考 [muduo](https://github.com/chenshuo/muduo) 网络库设计，支持 HTTP/1.1、内存池、LFU 缓存、MySQL 持久化、Redis 两级缓存、异步日志、AR 协同会话管理。
 
 > 🚀 **长连接峰值 9.8 万 QPS** | 短连接 4.2k QPS（localhost, LFU 缓存命中）  
 > 🎯 **P50 延迟 138µs** | P99 延迟 492µs（c=10, 无日志）  
-> 🧵 **多线程 One Loop Per Thread 架构**
+> 🧵 **多线程 One Loop Per Thread** | 🔐 注册/登录 + 场景会话管理
 
 ---
 
@@ -18,6 +18,7 @@
 - [特性](#特性)
 - [架构](#架构)
 - [快速开始](#快速开始)
+- [AR 场景会话 API](#ar-场景会话-api)
 - [性能压测](#性能压测)
 - [核心模块](#核心模块)
   - [Reactor 事件驱动](#1-reactor-事件驱动)
@@ -26,6 +27,8 @@
   - [内存池](#4-固定大小槽位内存池)
   - [异步日志](#5-双缓冲异步日志)
   - [定时器](#6-timerfd--红黑树定时器)
+  - [MySQL 持久化](#7-mysql-持久化与会话管理)
+  - [Redis 两级缓存](#8-redis-两级缓存)
 - [目录结构](#目录结构)
 - [使用示例](#使用示例)
 - [依赖与编译](#依赖与编译)
@@ -52,9 +55,19 @@
 
 | 特性 | 实现 |
 |------|------|
-| **HTTP/1.1** | 增量解析 + Keep-Alive 长连接 |
-| **LFU 缓存** | 哈希分片 + 访问频率老化机制，防止缓存污染 |
+| **HTTP/1.1** | 增量解析 + Keep-Alive 长连接，per-connection HttpContext |
+| **LFU 缓存 (L1)** | 哈希分片 + 频率老化机制，进程私有 µs 级命中 |
+| **Redis 缓存 (L2)** | 两级缓存协调，跨进程共享，穿透/击穿/雪崩保护 |
 | **静态文件服务** | 内存缓存 + mtime 校验自动失效 |
+
+### 持久化与会话
+
+| 特性 | 实现 |
+|------|------|
+| **MySQL 连接池** | 8 连接 + 保活机制 + borrow/recycle 自动归还 |
+| **异步 DB 线程池** | DBWorkerPool (4 线程)，不阻塞 EventLoop |
+| **Session 管理** | 注册/登录合一，场景进入/退出，status 状态机 |
+| **DAO 层** | 预处理语句防注入，SessionDAO + User 数据结构 |
 
 ### 基础设施
 
@@ -76,8 +89,9 @@ flowchart TB
         main["main()"]
         AL["AsyncLogging<br/>(异步日志)"]
         MP["MemoryPool<br/>(内存池)"]
-        SFC["StaticFileCache<br/>(LFU 缓存)"]
-        HS["HttpServer<br/>(HTTP 外观类)"]
+        SFC["TwoLevelCache<br/>(L1 LFU + L2 Redis)"]
+        MYSQL["MySQL Pool<br/>(连接池 + DAO)"]
+        HS["HttpServer<br/>(HTTP + Session API)"]
     end
 
     subgraph MainReactor["main Reactor (EventLoop)"]
@@ -99,6 +113,9 @@ flowchart TB
     main --> AL
     main --> MP
     main --> SFC
+    main --> MYSQL
+    SFC --> Redis["Redis<br/>L2 共享缓存"]
+    MYSQL --> MySQLDB["MySQL<br/>持久化存储"]
     HS --> MainReactor
     Acceptor -->|"round‑robin 分发<br/>+ wakeup() 唤醒"| ThreadPool
 ```
@@ -147,6 +164,14 @@ sequenceDiagram
 - **Linux** (需要 epoll)
 - **CMake** >= 3.0
 - **GCC** >= 4.8 或 Clang >= 3.3 (支持 C++11)
+- **MySQL** >= 5.7 (可选，持久化会话数据)
+- **Redis** >= 5.0 (可选，L2 共享缓存)
+- **hiredis** (可选，Redis C 客户端)
+
+```bash
+# 安装依赖
+sudo apt install libmysqlclient-dev libhiredis-dev redis-server mysql-server -y
+```
 
 ### 编译
 
@@ -154,7 +179,7 @@ sequenceDiagram
 git clone https://github.com/yourname/webserver.git
 cd webserver
 
-# 编译
+# 编译（自动检测 MySQL/hiredis，缺失则跳过对应模块）
 cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)
 ```
 
@@ -171,6 +196,34 @@ cd ..
 # Static files root: www/
 # LFU cache capacity: 200 files
 # Memory pool: initialized
+# MySQL + DBWorkerPool initialized       (如果安装了 libmysqlclient-dev)
+# Redis + TwoLevelCache initialized       (如果安装了 libhiredis-dev)
+```
+
+### 数据库初始化
+
+```bash
+# 连接 MySQL 并建库建表
+mysql -u root -p <<EOF
+CREATE DATABASE IF NOT EXISTS webserver;
+USE webserver;
+CREATE TABLE IF NOT EXISTS users (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    username    VARCHAR(64) NOT NULL UNIQUE,
+    passwd_hash VARCHAR(256) NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    session_token VARCHAR(128) NOT NULL,
+    user_id       BIGINT NOT NULL,
+    scene_id      VARCHAR(64) DEFAULT '',
+    status        TINYINT DEFAULT 0,
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+EOF
 ```
 
 ### 测试
@@ -191,6 +244,22 @@ curl -si http://localhost:8080/
 ```
 
 ---
+
+## AR 场景会话 API
+
+MySQL 持久化 + Redis 缓存加持下的 AR 协同场景会话管理。
+
+| API | 方法 | 说明 | SQL |
+|-----|------|------|-----|
+| `/api/auth?username=xx&password=yy` | POST | 注册/登录合一，返回 session token | `SELECT` / `INSERT users` + `INSERT sessions` |
+| `/api/session/enter?token=xx&scene=N` | POST | 进入场景 (status=1, scene_id=N) | `UPDATE sessions` |
+| `/api/session/exit?token=xx` | POST | 退出场景 (status=0, scene_id 清空) | `SELECT status` → `UPDATE sessions` |
+| `/api/session?token=xx` | GET | 查询会话状态 | `SELECT` sessions 全字段 |
+
+场景编号：1-苔蚀巨神废墟、2-深空失联观测站、3-烟雨枫桥渡、4-灰霾地铁避难所、5-霓虹黑市深巷。
+
+浏览器 Demo：启动服务器后访问 `http://localhost:8080/`，输入用户名密码即可体验完整认证 → 进入场景 → 退出场景 → 请求日志流程。
+
 
 ## 性能压测
 
@@ -400,6 +469,67 @@ flowchart LR
 - `timerfd` 将定时事件统一到 epoll 事件循环中，无需独立线程
 - 支持一次性任务 (`interval=0`) 和周期性任务 (`interval>0`)
 
+### 7. MySQL 持久化与会话管理
+
+```mermaid
+flowchart LR
+    API["/api/auth<br/>/api/session/enter<br/>/api/session/exit"]
+    API --> DWP["DBWorkerPool<br/>4 线程异步执行"]
+    DWP --> Pool["MySQLConnectionPool<br/>8 连接 + shared_ptr 自动归还"]
+    Pool --> MySQL["MySQL 8.0<br/>users + sessions"]
+```
+
+**连接池设计：**
+
+- `shared_ptr<MYSQL>` + 自定义 deleter 自动 `recycle()` 归还，与内存池 `unique_ptr + ChannelDeleter` 一脉相承
+- 保活：`TimerQueue::runEvery(300s, keepAliveFunc)` 每 5 分钟 ping 空闲连接
+- 降级：`borrow()` 超时 3s 返回 `nullptr`，调用方穿透到下一层
+
+**异步 DB 执行：**
+
+- DBWorkerPool（4 线程）独立执行阻塞 SQL，`std::promise/future` 桥接同步等待（5s 超时）
+- 关键：DB 操作不阻塞 EventLoop 线程，epoll_wait 不受影响
+- 线程数 = 连接池大小，避免连接闲置
+
+**Session 状态机：**
+
+```
+认证(status=0) → 进入场景(status=1, scene_id=1~5) → 退出(status=0, scene_id清空) → 重新进入...
+```
+
+**两表 ER：**
+
+```
+users (id, username, passwd_hash, created_at)
+  │ 1:N
+  ▼
+sessions (id, session_token, user_id FK, scene_id, status, created_at, updated_at)
+```
+
+### 8. Redis 两级缓存
+
+```mermaid
+flowchart TB
+    REQ["GET /assets/model.glb"] --> L1["L1: LFU 内存缓存<br/>进程私有, µs级"]
+    L1 -->|"miss"| L2["L2: Redis SETEX<br/>跨进程共享, 0.3ms"]
+    L2 -->|"miss"| DISK["读磁盘<br/>2-5ms"]
+    DISK -->|"回填"| L2
+    DISK -->|"回填"| L1
+    L2 -->|"回填"| L1
+```
+
+**两级缓存协调器 `TwoLevelCache`：**
+
+| 机制 | 实现 |
+|------|------|
+| 读路径 | L1(µs) → L2 Redis(0.3ms) → 磁盘(2-5ms)，任一层不可用穿透到下一层 |
+| 写路径 | L1 put + L2 SETEX (同步，localhost ~0.3ms，磁盘 IO 后顺带写入可接受) |
+| 雪崩保护 | TTL = 3600 + hash(key) % 300，批量缓存不会同时过期 |
+| 穿透保护 | 不存在 key 缓存 30s 空值标记，阻止无效请求打到磁盘 |
+| 击穿保护 | 同 key 重建互斥锁，仅一个线程执行磁盘 IO，其余等待或返回旧值 |
+
+**多实例部署时**，Redis 作为缓存一致性锚点——任何实例 L1 miss 都从 Redis 补齐并回填本地 L1。
+
 ---
 
 ## 目录结构
@@ -452,6 +582,15 @@ webserver/
 │   │   ├── Timer.h                  #     定时器对象
 │   │   └── TimerQueue.h             #     timerfd + std::set 红黑树定时器队列
 │   │
+│   ├── db/                          #   MySQL 持久化层
+│   │   ├── MySQLConnectionPool.h    #     MySQL 连接池
+│   │   ├── DBWorkerPool.h           #     异步 DB 工作线程池
+│   │   └── SessionDAO.h             #     用户/会话 DAO
+│   │
+│   ├── cache/                       #   Redis 两级缓存
+│   │   ├── RedisConnectionPool.h    #     Redis 连接池
+│   │   └── TwoLevelCache.h          #     L1 LFU + L2 Redis 协调器
+│   │
 │   ├── memoryPool.h                 #   内存池 (64 级固定槽位)
 │   ├── LFU.h                        #   LFU 缓存 (KLfuCache + KHashLfuCache)
 │   └── KICachePolicy.h              #   缓存策略抽象接口
@@ -487,6 +626,13 @@ webserver/
 │   │   ├── LogFile.cpp
 │   │   ├── LogStream.cpp
 │   │   └── Logger.cpp
+│   ├── db/
+│   │   ├── MySQLConnectionPool.cpp
+│   │   ├── DBWorkerPool.cpp
+│   │   └── SessionDAO.cpp
+│   ├── cache/
+│   │   ├── RedisConnectionPool.cpp
+│   │   └── TwoLevelCache.cpp
 │   └── timer/
 │       ├── Timer.cpp
 │       └── TimerQueue.cpp
@@ -503,10 +649,9 @@ webserver/
 │       └── app.js
 │
 ├── benchmark/                       # 压测工具
-│   ├── run.sh                       #   一键自动化压测
 │   ├── long_conn.sh                 #   长连接压测 (wrk)
 │   ├── short_conn.sh                #   短连接压测 (ab)
-│   ├── gdb_debug.gdb                #   gdb 崩溃调试脚本
+│   ├── test_ar_scene.sh             #   AR 场景切换模拟测试
 │   ├── benchmark.md                 #   压测完整报告
 │   └── results/                     #   压测原始日志
 │

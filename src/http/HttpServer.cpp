@@ -40,7 +40,7 @@ void HttpServer::onConnection(const TcpConnectionPtr& conn)
 void HttpServer::onMessage(const TcpConnectionPtr& conn, Buffer* buf, Timestamp receiveTime)
 {
     // 获取该连接的HttpContext (每连接独立，无线程竞争)
-    HttpContext& context = conn->getContext();
+    HttpContext& context = conn->getContext();//getContext()返回的是HTTP 协议层上下文(每连接独立的解析状态，避免多线程竞争)
 
     // 增量解析
     if (!context.parseRequest(buf, receiveTime))
@@ -66,6 +66,7 @@ void HttpServer::onMessage(const TcpConnectionPtr& conn, Buffer* buf, Timestamp 
 }
 
 // ========== 请求分发 ==========
+//主要做两件事：决定是否保持连接，然后回调用户。
 
 void HttpServer::onRequest(const TcpConnectionPtr& conn, const HttpRequest& req)
 {

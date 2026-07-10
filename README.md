@@ -1,11 +1,11 @@
-# webserver
+# 支持 AR 协同渲染服务的 webserver
 
 [![Platform](https://img.shields.io/badge/platform-Linux-blue)](https://kernel.org)
 [![Language](https://img.shields.io/badge/language-C%2B%2B11-orange)](https://isocpp.org)
 [![Build](https://img.shields.io/badge/build-CMake-green)](https://cmake.org)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 
-基于 **Reactor 模型**的 C++11 高性能 Web 服务器，参考 [muduo](https://github.com/chenshuo/muduo) 网络库设计，支持 HTTP/1.1、内存池、LFU 缓存、MySQL 持久化、Redis 两级缓存、异步日志、AR 协同会话管理。
+支持 AR 协同渲染服务**多Reactor 模型**的 C++11 高性能 Web 服务器，参考 [muduo](https://github.com/chenshuo/muduo) 网络库设计，支持 HTTP/1.1、内存池、LFU 缓存、MySQL 持久化、Redis 两级缓存、异步日志、AR 协同会话管理。
 
 > 🚀 **长连接峰值 9.8 万 QPS** | 短连接 4.2k QPS（localhost, LFU 缓存命中）  
 > 🎯 **P50 延迟 138µs** | P99 延迟 492µs（c=10, 无日志）  

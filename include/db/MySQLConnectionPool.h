@@ -38,7 +38,8 @@ public:
     MySQLConnectionPool(const ConnInfo& info, size_t poolSize = 8);
     ~MySQLConnectionPool();
 
-    /// 借一条连接。超时 3 秒未拿到返回 nullptr（降级信号）
+    /// 借一条连接。超时 3 秒未拿到返回 nullptr（降级信号），接池在 3 秒内借不到可用连接时，
+    // 不再继续阻塞或报致命错误，而是返回 nullptr，让上层改走一个较弱的兜底方案。
     std::shared_ptr<MYSQL> borrow();
 
     /// 归还连接（由 shared_ptr 自定义 deleter 自动调用，通常不需手动调用）

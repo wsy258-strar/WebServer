@@ -43,7 +43,7 @@ struct Session
 };
 
 /**
- * @brief 用户 & 会话数据访问层 (DAO)
+ * @brief 用户 & 会话数据访问层 (DAO)：Data Access Object（数据访问对象）层
  *
  * 通过 DBWorkerPool 异步执行，不阻塞 EventLoop。
  * 每个方法接收一个回调，在 DB 操作完成后调用。

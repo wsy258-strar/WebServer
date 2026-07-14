@@ -63,9 +63,9 @@ public:
 private:
     void run();
 
-    MySQLConnectionPool*               connPool_;
-    std::vector<std::thread>           workers_;
-    std::queue<DBTask>                 tasks_;
+    MySQLConnectionPool*               connPool_;// 数据库连接池；工作线程从这里借连接执行 SQL
+    std::vector<std::thread>           workers_;// 工作线程集合；每个线程持续从任务队列取任务执行
+    std::queue<DBTask>                 tasks_;// 待执行的数据库任务队列，例如“插入用户”“查询订单”
     std::mutex                         mutex_;
     std::condition_variable            cond_;
     std::atomic_bool                   running_{true};

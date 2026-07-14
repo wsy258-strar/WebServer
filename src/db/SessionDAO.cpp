@@ -14,6 +14,15 @@ std::string safeStr(const char* s) { return s ? std::string(s) : std::string(); 
 
 } // anonymous
 
+
+/* MYSQL_BIND 是 MySQL C API 的一个结构体
+* buffer_type：数据类型，如 MYSQL_TYPE_STRING、MYSQL_TYPE_LONGLONG。
+* buffer：实际数据变量的地址。
+* buffer_length：缓冲区容量，字符串或二进制数据尤其需要。
+* length：实际返回的数据长度（可选，但处理字符串截断时建议设置）。
+* is_null：字段是否为 SQL NULL（可选，但数据库列允许 NULL 时建议设置）。
+*/
+
 // ========== 用户操作 ==========
 
 void SessionDAO::findUserById(uint64_t userId,
@@ -35,7 +44,9 @@ void SessionDAO::findUserById(uint64_t userId,
         bind[0].buffer_type = MYSQL_TYPE_LONGLONG;
         uint64_t uid = userId;  // 非 const 副本，满足 MySQL C API
         bind[0].buffer = &uid;
+        //让 MySQL 预编译一条带 ? 占位符的 SQL 语句
         mysql_stmt_bind_param(stmt, bind);
+        //执行查询
         mysql_stmt_execute(stmt);
 
         uint64_t id = 0;
@@ -54,8 +65,8 @@ void SessionDAO::findUserById(uint64_t userId,
         result[3].buffer = created;
         result[3].buffer_length = sizeof(created);
         mysql_stmt_bind_result(stmt, result);
-
-        if (mysql_stmt_fetch(stmt) == 0)
+        //从查询结果中取出下一行，并把各列数据写入你提前绑定的 C++ 变量
+        if (mysql_stmt_fetch(stmt) == 0) //成功读取一行
         {
             auto* u = new User;
             u->id = id;

@@ -147,10 +147,10 @@ std::function<void()> MySQLConnectionPool::makeKeepAliveFunc()
         {
             auto c = self->idleConns_.front();
             self->idleConns_.pop();
-
+            //计算连接 c 距离上次使用已经空闲了多少整秒
             auto idleSec = std::chrono::duration_cast<std::chrono::seconds>(
                                now - c.lastUsed).count();
-
+            //判断空闲连接是否应被回收
             if (idleSec > 240)  // 空闲超 4 分钟 → ping
             {
                 if (self->ping(c.conn))

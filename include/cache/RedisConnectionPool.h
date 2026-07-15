@@ -15,7 +15,7 @@
  * Redis 单线程处理命令，连接池主要省 TCP 握手开销，不是为并行查询。
  * poolSize 建议 2-4，够用即可。
  *
- * borrow() 超时 2 秒返回 nullptr——调用方降级穿透到下一层。
+ * borrow() 超时 2 秒返回 nullptr——调用方降级穿透到下一层（MySQL 数据库）。
  */
 class RedisConnectionPool : noncopyable
 {
@@ -34,11 +34,11 @@ private:
     redisContext* createConnection();
     void          destroyConnection(redisContext* ctx);
 
-    std::string host_;
-    int         port_;
+    std::string host_; // Redis 所在机器
+    int         port_; // Redis 服务端口
     size_t      maxPoolSize_;
 
-    std::queue<redisContext*>  idleConns_;
+    std::queue<redisContext*>  idleConns_;//存放空闲 Redis 连接的队列
     std::mutex                 mutex_;
     std::condition_variable    cond_;
     std::atomic<size_t>        activeCount_{0};

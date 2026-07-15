@@ -71,7 +71,10 @@ bool SessionCache::get(const std::string& token, Session& session)
     if (!valid)
         return false;
 
-    refresh(token);
+    redisReply* refreshReply = static_cast<redisReply*>(
+        redisCommand(conn.get(), "EXPIRE %s %d", key.c_str(), kTtlSeconds));
+    if (refreshReply)
+        freeReplyObject(refreshReply);
     return true;
 }
 

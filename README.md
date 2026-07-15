@@ -249,6 +249,8 @@ curl -si http://localhost:8080/
 
 MySQL 持久化 + Redis 缓存加持下的 AR 协同场景会话管理。
 
+会话缓存使用 `session:{token}` 作为 Redis key，缓存会话 ID、用户 ID、场景、状态与时间字段。TTL 为 1800 秒：查询命中和成功进入场景时续期；认证后写入、退出场景后删除。Redis 未命中或不可用时，服务查询 MySQL 并在查到后回填缓存；MySQL 始终是最终数据来源。
+
 | API | 方法 | 说明 | SQL |
 |-----|------|------|-----|
 | `/api/auth?username=xx&password=yy` | POST | 注册/登录合一，返回 session token | `SELECT` / `INSERT users` + `INSERT sessions` |

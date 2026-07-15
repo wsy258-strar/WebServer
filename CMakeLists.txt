@@ -48,3 +48,10 @@ endif()
 #添加子目录使用
 add_subdirectory(src)
 add_subdirectory(memory)
+
+enable_testing()
+if(MYSQL_LIB AND HIREDIS_LIB)
+    add_executable(session_cache_test tests/session_cache_test.cpp)
+    target_link_libraries(session_cache_test src_lib memory_lib ${LIBS})
+    add_test(NAME session_cache_test COMMAND session_cache_test)
+endif()

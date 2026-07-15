@@ -25,6 +25,7 @@
 
 #ifdef HAS_REDIS
 #include <cache/RedisConnectionPool.h>
+#include <cache/SessionCache.h>
 #include <cache/TwoLevelCache.h>
 #endif
 
@@ -115,6 +116,20 @@ static bool readFileToMemory(const std::string& filePath,
     return true;
 }
 
+#ifdef HAS_MYSQL
+static std::string formatSessionJson(const Session& session)
+{
+    char buf[1024];
+    snprintf(buf, sizeof(buf),
+        "{\"status\":\"ok\",\"session_id\":%lu,\"token\":\"%s\",\"user_id\":%lu,"
+        "\"scene_id\":\"%s\",\"status_code\":%d,\"created_at\":\"%s\",\"updated_at\":\"%s\"}",
+        session.id, session.sessionToken.c_str(), session.userId,
+        session.sceneId.c_str(), session.status, session.createdAt.c_str(),
+        session.updatedAt.c_str());
+    return buf;
+}
+#endif
+
 int main(int argc, char *argv[])
 {
     // ========== 第一步: 启动异步日志 ==========
@@ -148,6 +163,7 @@ int main(int argc, char *argv[])
 #ifdef HAS_REDIS
     RedisConnectionPool redisPool("127.0.0.1", 6379, 4);
     TwoLevelCache twoLevelCache(&redisPool, kCacheCapacity);
+    SessionCache sessionCache(&redisPool);
     LOG_INFO << "Redis + TwoLevelCache initialized (L1 LFU + L2 Redis)";
 #else
     LOG_INFO << "Redis disabled (compile with -DHAS_REDIS to enable)";
@@ -163,7 +179,7 @@ int main(int argc, char *argv[])
     server.setHttpCallback(
         [&fileCache
 #ifdef HAS_REDIS
-         , &twoLevelCache
+         , &twoLevelCache, &sessionCache
 #endif
 #ifdef HAS_MYSQL
          , &dbWorkerPool
@@ -308,14 +324,19 @@ int main(int argc, char *argv[])
 
                 char token[128];
                 snprintf(token, sizeof(token), "tok-%ld-%04x", time(nullptr), rand() & 0xFFFF);
-                bool sessOk = dbWorkerPool.runSync<bool>(
-                    [&token, userId](std::shared_ptr<MYSQL> conn) -> bool {
+                uint64_t sessionId = dbWorkerPool.runSync<uint64_t>(
+                    [&token, userId](std::shared_ptr<MYSQL> conn) -> uint64_t {
                         char sql[512];
                         snprintf(sql, sizeof(sql),
                             "INSERT INTO sessions (session_token, user_id, scene_id, status) "
                             "VALUES ('%s', %lu, '', 0)", token, userId);
-                        return mysql_query(conn.get(), sql) == 0;
-                    }, false);
+                        if (mysql_query(conn.get(), sql) != 0) return 0;
+                        return mysql_insert_id(conn.get());
+                    }, 0);
+                bool sessOk = sessionId != 0;
+#ifdef HAS_REDIS
+                if (sessOk) sessionCache.put(Session(sessionId, token, userId, "", 0));
+#endif
 
                 char tail[256];
                 snprintf(tail, sizeof(tail), ",\"session_token\":\"%s\"}", sessOk ? token : "");
@@ -347,6 +368,30 @@ int main(int argc, char *argv[])
                         }
                         return ret == 0;
                     }, false);
+#ifdef HAS_REDIS
+                if (ok) {
+                    auto session = dbWorkerPool.runSync<std::shared_ptr<Session>>(
+                        [&token](std::shared_ptr<MYSQL> conn) -> std::shared_ptr<Session> {
+                            char sql[512];
+                            snprintf(sql, sizeof(sql),
+                                "SELECT id, session_token, user_id, scene_id, status, created_at, updated_at "
+                                "FROM sessions WHERE session_token='%s' ORDER BY id DESC LIMIT 1",
+                                token.c_str());
+                            if (mysql_query(conn.get(), sql) != 0) return nullptr;
+                            MYSQL_RES* res = mysql_store_result(conn.get());
+                            if (!res) return nullptr;
+                            MYSQL_ROW row = mysql_fetch_row(res);
+                            std::shared_ptr<Session> result;
+                            if (row) result = std::make_shared<Session>(
+                                strtoull(row[0], nullptr, 10), row[1],
+                                strtoull(row[2], nullptr, 10), row[3], atoi(row[4]),
+                                row[5] ? row[5] : "", row[6] ? row[6] : "");
+                            mysql_free_result(res);
+                            return result;
+                        }, std::shared_ptr<Session>());
+                    if (session) sessionCache.put(*session);
+                }
+#endif
                 resp->setContentType("application/json; charset=utf-8");
                 if (ok) resp->setBody("{\"status\":\"ok\",\"scene_id\":\"" + sceneId + "\"}");
                 else    resp->setBody("{\"error\":\"enter scene failed\"}");
@@ -393,6 +438,9 @@ int main(int argc, char *argv[])
                             "WHERE session_token='%s'", token.c_str());
                         return mysql_query(conn.get(), sql) == 0;
                     }, false);
+#ifdef HAS_REDIS
+                if (ok) sessionCache.remove(token);
+#endif
                 resp->setContentType("application/json; charset=utf-8");
                 if (ok) resp->setBody("{\"status\":\"ok\"}");
                 else    resp->setBody("{\"error\":\"exit failed\"}");
@@ -409,9 +457,17 @@ int main(int argc, char *argv[])
                     resp->setContentType("application/json; charset=utf-8");
                     resp->setBody("{\"error\":\"missing token\"}"); return;
                 }
-                using RowPtr = std::shared_ptr<std::string>;
-                auto result = dbWorkerPool.runSync<RowPtr>(
-                    [&token](std::shared_ptr<MYSQL> conn) -> RowPtr {
+#ifdef HAS_REDIS
+                Session cached;
+                if (sessionCache.get(token, cached)) {
+                    resp->setContentType("application/json; charset=utf-8");
+                    resp->setBody(formatSessionJson(cached));
+                    return;
+                }
+#endif
+                using SessionPtr = std::shared_ptr<Session>;
+                auto result = dbWorkerPool.runSync<SessionPtr>(
+                    [&token](std::shared_ptr<MYSQL> conn) -> SessionPtr {
                         char sql[512];
                         snprintf(sql, sizeof(sql),
                             "SELECT id, session_token, user_id, scene_id, status, created_at, updated_at "
@@ -421,19 +477,23 @@ int main(int argc, char *argv[])
                         MYSQL_RES* res = mysql_store_result(conn.get());
                         if (!res) return nullptr;
                         MYSQL_ROW row = mysql_fetch_row(res);
-                        RowPtr ret;
+                        SessionPtr ret;
                         if (row) {
-                            char buf[1024]; snprintf(buf, sizeof(buf),
-                                "{\"status\":\"ok\",\"session_id\":%s,\"token\":\"%s\",\"user_id\":%s,"
-                                "\"scene_id\":\"%s\",\"status_code\":%s,\"created_at\":\"%s\",\"updated_at\":\"%s\"}",
-                                row[0], row[1], row[2], row[3], row[4], row[5]?:"", row[6]?:"");
-                            ret = std::make_shared<std::string>(buf);
+                            ret = std::make_shared<Session>(
+                                strtoull(row[0], nullptr, 10), row[1],
+                                strtoull(row[2], nullptr, 10), row[3], atoi(row[4]),
+                                row[5] ? row[5] : "", row[6] ? row[6] : "");
                         }
                         mysql_free_result(res);
                         return ret;
-                    }, RowPtr());
+                    }, SessionPtr());
                 resp->setContentType("application/json; charset=utf-8");
-                if (result) resp->setBody(*result);
+                if (result) {
+#ifdef HAS_REDIS
+                    sessionCache.put(*result);
+#endif
+                    resp->setBody(formatSessionJson(*result));
+                }
                 else        resp->setBody("{\"status\":\"not_found\"}");
                 return;
             }
